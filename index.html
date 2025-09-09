@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Studio42 - GameDev AI</title>
+    <link rel="icon" href="/static/logo.ico" type="image/x-icon">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Audiowide&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/showdown/dist/showdown.min.js"></script>
+</head>
+<body>
+    <div id="left-sidebar">
+        <div class="panel project-panel">
+            <div class="panel-header tab-header">
+                 <button id="projects-tab-btn" class="tab-button active">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V6h5.17l2 2H20v10z"/></svg>
+                    <span class="sidebar-title">// PROJECTS</span>
+                 </button>
+                 <button id="examples-tab-btn" class="tab-button">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+                    <span class="sidebar-title">// EXAMPLES</span>
+                 </button>
+            </div>
+            <div id="projects-view" class="tab-content active-content">
+                <div class="panel-toolbar">
+                    <input type="text" id="new-project-name" placeholder="New Project...">
+                    <button id="new-project-btn" title="Create New Project">+</button>
+                </div>
+                <div id="project-list" class="sidebar-list"></div>
+            </div>
+            <div id="examples-view" class="tab-content">
+                 <div id="example-list" class="sidebar-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="app-container">
+        <header class="app-header">
+            <div class="header-left">
+                <img id="header-logo" src="/static/logo.ico" alt="Studio42 Logo">
+                <h1 class="header-title">STUDIO42</h1>
+            </div>
+            <div class="header-controls">
+                <div class="model-group">
+                    <label for="chat-model-select" class="control-label">CHAT MODEL:</label>
+                    <select id="chat-model-select" class="model-selector"></select>
+                </div>
+                 <div class="model-group">
+                    <label for="code-model-select" class="control-label">CODE MODEL:</label>
+                    <select id="code-model-select" class="model-selector"></select>
+                </div>
+                <button id="refresh-models-btn" class="header-button" title="Refresh Models">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="main-grid">
+            <div class="center-column">
+                <div class="panel chat-panel">
+                    <div class="panel-header">
+                        <h2>// COMMS CHANNEL</h2>
+                    </div>
+                    <div id="chat-history" class="chat-history">
+                        <div id="welcome-message" class="chat-message model-message">
+                            <div class="message-content">
+                                <p class="font-bold">// STUDIO42 ONLINE</p>
+                                <p>Create or select a project to begin.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chat-input-area">
+                        <form id="chat-form" class="chat-form">
+                            <textarea id="chat-input" rows="1" placeholder="Describe your game..." disabled></textarea>
+                            <button type="submit" id="send-button" title="Transmit" disabled>
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="m2.01 21 23-9-23-9v7l15 2-15 2z"/></svg>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="panel editor-panel">
+                     <div class="panel-header tab-header">
+                        <button id="editor-tab-btn" class="tab-button active">// CODE EDITOR</button>
+                        <button id="preview-tab-btn" class="tab-button">// SIMULATION</button>
+                    </div>
+
+                    <div id="editor-view" class="tab-content active-content">
+                        <div class="editor-layout">
+                            <div class="file-explorer">
+                                <div id="file-tree-header">PROJECT FILES</div>
+                                <div id="file-tree">
+                                    <div class="placeholder-small">[No Project Loaded]</div>
+                                </div>
+                            </div>
+                            <div class="editor-main">
+                                <div id="editor-tabs"></div>
+                                <div id="editor-content">
+                                    <div id="editor-placeholder" class="placeholder">
+                                        <p>&lt;Select a file to begin editing&gt;</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="preview-view" class="tab-content">
+                        <div class="panel-toolbar preview-toolbar">
+                            <button id="refresh-preview-btn">Refresh Simulation</button>
+                        </div>
+                        <iframe id="preview-frame" title="Code Preview"></iframe>
+                        <div id="preview-placeholder" class="placeholder">
+                            <p>[Simulation chamber empty]</p>
+                            <p class="small">An 'index.html' file must exist in the project.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="right-sidebar" class="panel tools-panel">
+                <div class="panel-header tab-header">
+                    <button id="inspector-tab-btn" class="tab-button active">// INSPECTOR</button>
+                    <button id="assets-tab-btn" class="tab-button">// ASSETS</button>
+                    <button id="settings-tab-btn" class="tab-button">// OLLAMA</button>
+                </div>
+
+                <div id="inspector-view" class="tab-content active-content">
+                    <div class="placeholder"><p>Game object inspector<br/>(Coming soon)</p></div>
+                </div>
+                <div id="assets-view" class="tab-content">
+                    <div class="panel-toolbar">
+                        <input type="file" id="asset-upload-input" style="display: none;" accept="image/*">
+                        <button id="asset-upload-btn" class="toolbar-btn">Upload Asset</button>
+                    </div>
+                    <div id="asset-browser" class="sidebar-list">
+                         <div class="placeholder-small">[No assets found in /static/assets]</div>
+                    </div>
+                </div>
+                <div id="settings-view" class="tab-content settings-panel">
+                    <div class="settings-section">
+                        <h3>Pull Model</h3>
+                        <form id="pull-model-form" class="settings-form">
+                            <input type="text" id="pull-model-name" placeholder="e.g., llama3" required>
+                            <button type="submit">Pull</button>
+                        </form>
+                        <div id="pull-status" class="status-message"></div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>Create Model</h3>
+                        <form id="create-model-form" class="settings-form">
+                            <input type="text" id="create-model-name" placeholder="New model name" required>
+                            <textarea id="create-modelfile" rows="4" placeholder="FROM llama3&#10;SYSTEM You are a pirate." required></textarea>
+                            <button type="submit">Create</button>
+                        </form>
+                         <div id="create-status" class="status-message"></div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>Delete Local Model</h3>
+                        <form id="delete-model-form" class="settings-form">
+                            <select id="delete-model-select" required>
+                                <option value="" disabled selected>Select model...</option>
+                            </select>
+                            <button type="submit" class="delete-button">Delete</button>
+                        </form>
+                        <div id="delete-status" class="status-message"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
+
