@@ -7,7 +7,7 @@ from werkzeug.utils import secure_filename
 import json
 
 # Initialize the Flask application
-app = Flask(__name__, static_folder='static', template_folder='static')
+app = Flask(__name__, static_folder='static', template_folder='templates')
 
 # --- CONFIGURATION ---
 OLLAMA_API_URL = os.environ.get('OLLAMA_API_URL', 'http://localhost:11434')

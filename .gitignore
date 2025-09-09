@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+venv/
+projects/*
+!projects/.gitkeep
+static/assets/*
+!static/assets/.gitkeep
+static/examples/*
+!static/examples/.gitkeep
+static/phaser/*
+!static/phaser/.gitkeep
