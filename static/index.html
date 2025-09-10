@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Studio42</title>
+    <link rel="icon" href="/static/logo.ico" type="image/x-icon">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Audiowide&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="session-history-panel">
+        <div class="session-panel-header">
+            <button id="new-chat-btn" title="New Project">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                <span>New Project</span>
+            </button>
+        </div>
+        <div id="session-list" class="session-list">
+            </div>
+    </div>
+
+    <div id="app-container">
+        <header class="app-header">
+            <div class="header-left">
+                <img id="header-logo" src="/static/logo.ico" alt="Studio42 Logo">
+                <h1 class="header-title">STUDIO42</h1>
+            </div>
+            <div class="header-controls">
+                <div class="model-group">
+                    <label for="chat-model-select" class="control-label">CHAT MODEL:</label>
+                    <select id="chat-model-select" class="model-selector"></select>
+                </div>
+                <div class="model-group">
+                    <label for="code-model-select" class="control-label">CODE MODEL:</label>
+                    <select id="code-model-select" class="model-selector"></select>
+                </div>
+                <button id="refresh-models-btn" class="header-button" title="Refresh Models">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="main-grid">
+            
+            <div class="panel chat-panel">
+                <div class="panel-header">
+                    <h2>// COMMS CHANNEL</h2>
+                </div>
+                <div id="chat-history" class="chat-history">
+                    <div id="welcome-message" class="chat-message model-message">
+                        <div class="message-content">
+                            <p class="font-bold">// STUDIO42 ONLINE</p>
+                            <p>Awaiting input. Select your models and issue a command to begin a new project.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-input-area">
+                    <div class="chat-controls">
+                         <div class="tts-toggle-container">
+                            <label for="tts-toggle" class="control-label">VOICE</label>
+                            <label class="switch">
+                                <input type="checkbox" id="tts-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <form id="chat-form" class="chat-form">
+                        <textarea id="chat-input" rows="1" placeholder="Describe a new app or game..."></textarea>
+                        <button type="submit" id="send-button" title="Transmit">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="m2.01 21 23-9-23-9v7l15 2-15 2z"/></svg>
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="panel code-panel">
+                <div class="panel-header tab-header">
+                    <button id="code-tab" class="tab-button active">// RENDERED HOLO-CODE</button>
+                    <button id="preview-tab" class="tab-button">// VISUAL SIMULATION</button>
+                    <button id="settings-tab" class="tab-button">// OLLAMA CONTROL</button>
+                    <button id="files-tab" class="tab-button">// PROJECT FILES</button>
+                </div>
+                
+                <div id="code-preview-wrapper" class="code-preview-wrapper">
+                    <div id="code-view" class="tab-content active-content">
+                        <button id="copy-code-btn" class="copy-button">Copy</button>
+                        <pre><code id="code-block" class="language-html"></code></pre>
+                        <div id="code-placeholder" class="placeholder">
+                            <p>&lt;Awaiting holographic code transmission...&gt;</p>
+                        </div>
+                    </div>
+
+                    <div id="preview-view" class="tab-content">
+                        <iframe id="preview-frame" title="Code Preview"></iframe>
+                        <div id="preview-placeholder" class="placeholder">
+                            <p>[Simulation chamber empty]</p>
+                        </div>
+                    </div>
+                    <div id="files-view" class="tab-content">
+                        <div style="padding:1rem; gap:1rem; display:flex; flex-direction:column; width:100%;">
+                            <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                                <input id="project-name" placeholder="Project name (e.g., Phaser Demo)" style="flex:1;"/>
+                                <button id="init-project-btn">Init Project</button>
+                                <button id="confirm-plan-btn" title="Saves plan+manifest to server">Confirm Plan + Manifest</button>
+                                <button id="generate-selected-btn" title="Generate selected file">Generate File</button>
+                                <button id="summarize-on-save-toggle" title="Summarize files on save">Summarize on Save</button>
+                            </div>
+                            <textarea id="project-brief" rows="4" placeholder="Project brief (game/app goals, constraints)"></textarea>
+                            <textarea id="manifest-json" rows="10" placeholder='Paste/inspect manifest JSON here ({"files":[{"path":...,"intent":...}], "folders":[...]})'></textarea>
+                            <div id="file-tree" style="border:1px solid var(--color-border); padding:0.75rem; border-radius:6px; min-height:150px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="code-modification-area" class="chat-input-area" style="display: none;">
+                    <form id="modification-form" class="chat-form">
+                        <textarea id="modification-input" rows="1" placeholder="Describe a change to the code..."></textarea>
+                        <button type="submit" id="modification-send-button" title="Modify Code">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83zM3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/></svg>
+                        </button>
+                    </form>
+                </div>
+
+                <div id="settings-view" class="tab-content settings-panel">
+                    <div class="settings-section">
+                        <h3>Pull Model</h3>
+                        <form id="pull-model-form" class="settings-form">
+                            <input type="text" id="pull-model-name" placeholder="e.g., llama3" required>
+                            <button type="submit">Pull</button>
+                        </form>
+                        <div id="pull-status" class="status-message"></div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>Create Model</h3>
+                        <form id="create-model-form" class="settings-form">
+                            <input type="text" id="create-model-name" placeholder="New model name" required>
+                            <textarea id="create-modelfile" rows="4" placeholder="FROM llama3\nSYSTEM You are a pirate." required></textarea>
+                            <button type="submit">Create</button>
+                        </form>
+                         <div id="create-status" class="status-message"></div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>Delete Local Model</h3>
+                        <form id="delete-model-form" class="settings-form">
+                            <select id="delete-model-select" required>
+                                <option value="" disabled selected>Select model to delete...</option>
+                            </select>
+                            <button type="submit" class="delete-button">Delete Selected Model</button>
+                        </form>
+                        <div id="manage-status" class="status-message"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

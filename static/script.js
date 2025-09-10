@@ -1,478 +1,889 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- DOM Element Cache ---
-    const dom = {
-        chatModelSelect: document.getElementById('chat-model-select'),
-        codeModelSelect: document.getElementById('code-model-select'),
-        refreshModelsBtn: document.getElementById('refresh-models-btn'),
-        newProjectNameInput: document.getElementById('new-project-name'),
-        newProjectBtn: document.getElementById('new-project-btn'),
-        projectList: document.getElementById('project-list'),
-        exampleList: document.getElementById('example-list'),
-        chatHistory: document.getElementById('chat-history'),
-        welcomeMessage: document.getElementById('welcome-message'),
-        chatForm: document.getElementById('chat-form'),
-        chatInput: document.getElementById('chat-input'),
-        sendButton: document.getElementById('send-button'),
-        fileTree: document.getElementById('file-tree'),
-        editorTabs: document.getElementById('editor-tabs'),
-        editorContent: document.getElementById('editor-content'),
-        editorPlaceholder: document.getElementById('editor-placeholder'),
-        previewFrame: document.getElementById('preview-frame'),
-        previewPlaceholder: document.getElementById('preview-placeholder'),
-        refreshPreviewBtn: document.getElementById('refresh-preview-btn'),
-        assetUploadInput: document.getElementById('asset-upload-input'),
-        assetUploadBtn: document.getElementById('asset-upload-btn'),
-        assetBrowser: document.getElementById('asset-browser'),
-        // Ollama Settings
-        pullModelForm: document.getElementById('pull-model-form'),
-        pullModelName: document.getElementById('pull-model-name'),
-        pullStatus: document.getElementById('pull-status'),
-        createModelForm: document.getElementById('create-model-form'),
-        createModelName: document.getElementById('create-model-name'),
-        createModelfile: document.getElementById('create-modelfile'),
-        createStatus: document.getElementById('create-status'),
-        deleteModelForm: document.getElementById('delete-model-form'),
-        deleteModelSelect: document.getElementById('delete-model-select'),
-        deleteStatus: document.getElementById('delete-status'),
+    // DOM Element References
+    const chatModelSelect = document.getElementById('chat-model-select');
+    const codeModelSelect = document.getElementById('code-model-select');
+    const refreshModelsBtn = document.getElementById('refresh-models-btn');
+    const newChatBtn = document.getElementById('new-chat-btn');
+    const sessionListEl = document.getElementById('session-list');
+    const chatHistoryEl = document.getElementById('chat-history');
+    const chatForm = document.getElementById('chat-form');
+    const chatInput = document.getElementById('chat-input');
+    const sendButton = document.getElementById('send-button');
+    const welcomeMessage = document.getElementById('welcome-message');
+    const ttsToggle = document.getElementById('tts-toggle');
+    
+    // Tab Elements
+    const tabs = document.querySelectorAll('.tab-button');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    // Code & Preview Elements
+    const codeBlock = document.getElementById('code-block');
+    const copyCodeBtn = document.getElementById('copy-code-btn');
+    const codePlaceholder = document.getElementById('code-placeholder');
+    const previewFrame = document.getElementById('preview-frame');
+    const previewPlaceholder = document.getElementById('preview-placeholder');
+
+    // Modification Elements
+    const modificationArea = document.getElementById('code-modification-area');
+    const modificationForm = document.getElementById('modification-form');
+    const modificationInput = document.getElementById('modification-input');
+    const modificationSendButton = document.getElementById('modification-send-button');
+
+    // Settings Elements
+    const pullModelForm = document.getElementById('pull-model-form');
+    const pullModelName = document.getElementById('pull-model-name');
+    const pullStatus = document.getElementById('pull-status');
+    const createModelForm = document.getElementById('create-model-form');
+    const createModelName = document.getElementById('create-model-name');
+    const createModelfile = document.getElementById('create-modelfile');
+    const createStatus = document.getElementById('create-status');
+    const deleteModelForm = document.getElementById('delete-model-form');
+    const deleteModelSelect = document.getElementById('delete-model-select');
+    const manageStatus = document.getElementById('manage-status');
+
+    // Project Elements
+    const projectNameInput = document.getElementById('project-name');
+    const initProjectBtn = document.getElementById('init-project-btn');
+    const confirmPlanBtn = document.getElementById('confirm-plan-btn');
+    const generateSelectedBtn = document.getElementById('generate-selected-btn');
+    const projectBriefEl = document.getElementById('project-brief');
+    const manifestJsonEl = document.getElementById('manifest-json');
+    const fileTreeEl = document.getElementById('file-tree');
+    const summarizeToggle = document.getElementById('summarize-on-save-toggle');
+
+    // Application State
+    let isLoading = false;
+    let isTtsEnabled = false;
+    let preferredVoice = null;
+    let chatSessions = [];
+    let activeSessionId = null;
+    let currentProjectId = null;
+    let summarizeOnSave = true;
+    let _selectedPath = null;
+
+    let conversationState = {
+        isModifying: false,
+        awaitingPlanConfirmation: false,
+        lastUserPrompt: null,
+        currentPlan: null,
+        currentCode: null,
+        currentManifest: null
+    };
+    let chatModelHistory = [];
+
+    // Enhanced System Prompts for Phaser Game Development
+    const chatSystemPrompt = {
+        role: 'system',
+        content: `You are an expert AI project manager specializing in Phaser 3 game development. You help users create web games and applications using Phaser 3.88 (latest version). Always respond in structured JSON format.
+
+For Phaser games, ensure you include:
+- Proper Phaser 3.88 CDN link: https://cdn.jsdelivr.net/npm/phaser@3.88.0/dist/phaser.min.js
+- Scene management (preload, create, update)
+- Asset loading patterns
+- Physics systems (Arcade, Matter.js)
+- Input handling (keyboard, mouse, touch)
+- Proper game configuration
+
+Response scenarios:
+
+1. **New Project Request**: Create a detailed plan with file manifest
+   JSON: { "response_for_user": "...", "plan": "...", "manifest": {"files": [{"path": "...", "intent": "..."}]} }
+
+2. **Plan Modification**: Update the plan based on user feedback
+   JSON: Same structure with revised plan and manifest
+
+3. **Plan Confirmation**: Signal to proceed with code generation
+   JSON: { "PROCEED_TO_CODE": true }
+
+4. **Code Modification**: Create modification instructions
+   JSON: { "response_for_user": "...", "modification_instruction": "..." }
+
+Always include a manifest with specific file paths for multi-file projects.`
     };
 
-    // --- Application State ---
-    const state = {
-        isLoading: false,
-        activeProject: null,
-        chatHistory: [],
-        openFiles: new Map(), // path -> { content, editorEl, tabEl }
-        activeFile: null,
-        assets: [],
-        markdownConverter: new showdown.Converter({ tables: true, strikethrough: true, tasklists: true }),
-    };
+    const codeSystemPrompt = {
+        role: 'system',
+        content: `You are an expert Phaser 3 game developer. Generate complete, runnable code using Phaser 3.88.
 
-    // --- System Prompt ---
-    const CHAT_SYSTEM_PROMPT = `You are a master game developer AI. Your purpose is to create a Phaser 3 game based on user requests.
-You must generate all necessary files within a structured project. The project has predefined folders: '/js', '/css', and '/assets'.
-- All JavaScript code MUST go in the '/js' folder.
-- All CSS code MUST go in the '/css' folder.
-- You will be given a list of available images in the '/assets' folder. Use them by their filename (e.g., 'my_image.png'). The path in the code should be 'assets/my_image.png'.
+For HTML files with Phaser:
+- Use CDN: https://cdn.jsdelivr.net/npm/phaser@3.88.0/dist/phaser.min.js
+- Include complete game configuration
+- Implement proper scene structure
+- Add responsive canvas sizing
+- Include error handling
 
-**CRITICAL RULES FOR 'index.html':**
-1.  It MUST link to 'phaser.min.js', which is located in the project's root directory.
-2.  The '<script src="phaser.min.js"></script>' tag MUST come BEFORE any other game script tags.
-3.  ALL '<script>' and '<link rel="stylesheet">' tags MUST be placed correctly (scripts before '</body>', links in '<head>').
+For standalone JS files:
+- Export as ES6 modules when appropriate
+- Follow Phaser 3 best practices
+- Include clear comments for complex logic
 
-**Your response MUST be a single JSON object with two keys:**
-1.  "response_for_user": A friendly, conversational message for the user, formatted in Markdown. Explain what you've done.
-2.  "file_operations": An array of objects, where each object represents a file to be created or updated. Each object must have three keys:
-    - "operation": Either "CREATE" or "UPDATE".
-    - "path": The full path of the file from the project root (e.g., "index.html", "js/main.js").
-    - "content": A string containing the complete code/content for that file.`;
-
-    // --- API Service ---
-    const api = {
-        async proxy(path, method, body) {
-            const response = await fetch('/api/proxy', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path, method, body }),
-            });
-            // For chat, we get raw text to handle potential JSON errors
-            if (path === '/api/chat') {
-                const text = await response.text();
-                if (!response.ok) throw new Error(text);
-                return text;
-            }
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || `Server error: ${response.status}`);
-            return data;
-        },
-        getProjects: () => fetch('/api/projects').then(res => res.json()),
-        createProject: (project_id) => fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id }) }).then(res => res.json()),
-        getProjectTree: (project_id) => fetch(`/api/projects/${project_id}`).then(res => res.json()),
-        getFile: (project_id, path) => fetch(`/api/projects/${project_id}/file?path=${encodeURIComponent(path)}`).then(res => res.json()),
-        saveFile: (project_id, path, content) => fetch(`/api/projects/${project_id}/file`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content }) }).then(res => res.json()),
-        getExamples: () => fetch('/api/examples').then(res => res.json()),
-        getAssets: () => fetch('/api/assets').then(res => res.json()),
-        uploadAsset: (formData) => fetch('/api/assets', { method: 'POST', body: formData }).then(res => res.json()),
+Output only raw code, no explanations or markdown.`
     };
     
-    // --- UI Rendering & Actions ---
-    const render = {
-        projects: (projects) => { dom.projectList.innerHTML = projects.map(p => `<div class="sidebar-item" data-project-id="${p}">${p}</div>`).join('') || `<div class="placeholder-small">No projects.</div>`; },
-        examples: (examples) => { dom.exampleList.innerHTML = examples.map(e => `<div class="sidebar-item" data-example-name="${e}">${e}</div>`).join('') || `<div class="placeholder-small">No examples found.</div>`; },
-        assets: (assets) => { dom.assetBrowser.innerHTML = assets.map(a => `<div class="sidebar-item" title="${a}">${a}</div>`).join('') || `<div class="placeholder-small">No assets.</div>`; },
-        fileTree: (tree, container) => { /* ... (same as previous version) ... */ },
-        chatMessage: (role, content) => { /* ... (same as previous version) ... */ },
-        editor: () => { /* ... (same as previous version) ... */ },
-        preview: () => { /* ... (same as previous version) ... */ },
+    // TTS (Text-to-Speech) Logic
+    const loadVoices = () => {
+        const voices = speechSynthesis.getVoices();
+        preferredVoice = voices.find(voice => voice.lang.startsWith('en') && voice.localService) || 
+                         voices.find(voice => voice.lang.startsWith('en')) || voices[0];
     };
-    // Re-add the full render functions that were omitted for brevity
-    render.fileTree = (tree, container) => {
-        container.innerHTML = '';
-        if (!tree || tree.length === 0) {
-            container.innerHTML = `<div class="placeholder-small">[Project is empty]</div>`;
-            return;
-        }
-        tree.forEach(item => {
-            if (item.type === 'directory') {
-                const dirEl = document.createElement('div');
-                dirEl.className = 'dir-item';
-                dirEl.innerHTML = `<div class="dir-name"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg> <span>${item.name}</span></div>`;
-                const childrenContainer = document.createElement('div');
-                childrenContainer.className = 'dir-children';
-                dirEl.appendChild(childrenContainer);
-                container.appendChild(dirEl);
-                if (item.children) render.fileTree(item.children, childrenContainer);
-            } else {
-                const fileEl = document.createElement('div');
-                fileEl.className = 'file-item';
-                fileEl.dataset.path = item.path;
-                fileEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></svg> <span>${item.name}</span>`;
-                container.appendChild(fileEl);
-            }
+    
+    const speak = (text) => {
+        if (!isTtsEnabled || !text) return;
+        speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        if (preferredVoice) utterance.voice = preferredVoice;
+        speechSynthesis.speak(utterance);
+    };
+    
+    speechSynthesis.onvoiceschanged = loadVoices;
+    loadVoices();
+    
+    ttsToggle.addEventListener('change', () => {
+        isTtsEnabled = ttsToggle.checked;
+        if (!isTtsEnabled) speechSynthesis.cancel();
+    });
+
+    // API & Model Management
+    const fetchFromProxy = async (path, method, body) => {
+        const response = await fetch('/api/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, method, body }),
         });
-    };
-    render.chatMessage = (role, content) => {
-        dom.welcomeMessage.style.display = 'none';
-        const msgEl = document.createElement('div');
-        msgEl.className = `chat-message ${role}-message`;
-        const contentHtml = role === 'model' ? state.markdownConverter.makeHtml(content) : content.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        msgEl.innerHTML = `<div class="message-content">${contentHtml}</div>`;
-        dom.chatHistory.appendChild(msgEl);
-        dom.chatHistory.scrollTop = dom.chatHistory.scrollHeight;
-    };
-    render.editor = () => {
-        dom.editorTabs.innerHTML = '';
-        let hasActive = false;
-        state.openFiles.forEach((file, path) => {
-            file.tabEl.classList.toggle('active', path === state.activeFile);
-            file.editorEl.classList.toggle('active', path === state.activeFile);
-            dom.editorTabs.appendChild(file.tabEl);
-            if (path === state.activeFile) hasActive = true;
-        });
-        dom.editorPlaceholder.style.display = hasActive ? 'none' : 'flex';
-    };
-    render.preview = () => {
-        if (state.activeProject) {
-            api.getProjectTree(state.activeProject).then(tree => {
-                 const hasIndex = tree.some(item => item.name === 'index.html');
-                 if (hasIndex) {
-                    dom.previewFrame.src = `/projects/${state.activeProject}/index.html?t=${Date.now()}`;
-                    dom.previewPlaceholder.style.display = 'none';
-                    dom.previewFrame.style.display = 'block';
-                 } else {
-                    dom.previewPlaceholder.style.display = 'flex';
-                    dom.previewFrame.style.display = 'none';
-                 }
-            });
-        } else {
-            dom.previewPlaceholder.style.display = 'flex';
-            dom.previewFrame.style.display = 'none';
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Server responded with status ${response.status}`);
         }
+        const text = await response.text();
+        return text ? JSON.parse(text) : {};
     };
 
-
-    const actions = {
-        setLoading: (isLoading) => { state.isLoading = isLoading; dom.sendButton.disabled = isLoading || !state.activeProject; },
-        // ... (actions for projects, files, etc. are the same)
-    };
-     // Re-add the full actions object that was omitted for brevity
-    actions.loadProjects = async () => { render.projects(await api.getProjects()); };
-    actions.loadExamples = async () => { render.examples(await api.getExamples()); };
-    actions.loadAssets = async () => { state.assets = await api.getAssets(); render.assets(state.assets); };
-    actions.setActiveProject = async (projectId) => {
-        state.activeProject = projectId;
-        state.openFiles.clear();
-        state.activeFile = null;
-        state.chatHistory = [];
-        render.editor();
-        document.querySelectorAll('#project-list .sidebar-item').forEach(el => el.classList.toggle('active', el.dataset.projectId === projectId));
-        dom.chatHistory.innerHTML = '';
-        dom.chatHistory.appendChild(dom.welcomeMessage);
-        dom.welcomeMessage.style.display = 'block';
-        dom.welcomeMessage.querySelector('p:last-child').textContent = `Project "${projectId}" is active.`;
-        dom.chatInput.disabled = false;
-        dom.sendButton.disabled = false;
-        await actions.refreshFileTree();
-        render.preview();
-    };
-    actions.refreshFileTree = async () => { if (state.activeProject) render.fileTree(await api.getProjectTree(state.activeProject), dom.fileTree); };
-    actions.openFile = (path) => {
-        if (state.openFiles.has(path)) { actions.setActiveFile(path); return; }
-        api.getFile(state.activeProject, path).then(fileData => {
-            const tabEl = document.createElement('button');
-            tabEl.className = 'editor-tab';
-            tabEl.dataset.path = path;
-            tabEl.innerHTML = `<span>${path.split('/').pop()}</span><button class="close-tab-btn">×</button>`;
-            const editorEl = document.createElement('div');
-            editorEl.className = 'code-editor';
-            editorEl.dataset.path = path;
-            const textArea = document.createElement('textarea');
-            textArea.value = fileData.content;
-            editorEl.appendChild(textArea);
-            dom.editorContent.appendChild(editorEl);
-            state.openFiles.set(path, { content: fileData.content, editorEl, tabEl });
-            actions.setActiveFile(path);
-        });
-    };
-    actions.setActiveFile = (path) => { state.activeFile = path; render.editor(); };
-    actions.closeFile = (path) => {
-        const file = state.openFiles.get(path);
-        if (!file) return;
-        file.tabEl.remove();
-        file.editorEl.remove();
-        state.openFiles.delete(path);
-        if (state.activeFile === path) {
-            state.activeFile = state.openFiles.keys().next().value || null;
-        }
-        render.editor();
-    };
-    actions.saveActiveFile = () => {
-        if (!state.activeFile) return;
-        const file = state.openFiles.get(state.activeFile);
-        const newContent = file.editorEl.querySelector('textarea').value;
-        if (file.content === newContent) return;
-        file.content = newContent;
-        api.saveFile(state.activeProject, state.activeFile, newContent);
-    };
-    actions.fetchOllamaModels = async (populateDelete = false) => {
+    const fetchOllamaModels = async () => {
         try {
-            const data = await api.proxy('/api/tags', 'GET');
+            const data = await fetchFromProxy('/api/tags', 'GET');
             const models = data.models || [];
-            const selects = [dom.chatModelSelect, dom.codeModelSelect];
-            if(populateDelete) selects.push(dom.deleteModelSelect);
-
-            selects.forEach(sel => { 
-                const currentVal = sel.value;
-                sel.innerHTML = sel.id === 'delete-model-select' ? '<option value="" disabled selected>Select model...</option>' : '';
-                models.forEach(model => sel.add(new Option(model.name, model.name)));
-                sel.value = currentVal;
+            const selections = { 
+                chat: chatModelSelect.value, 
+                code: codeModelSelect.value, 
+                delete: deleteModelSelect.value 
+            };
+            
+            [chatModelSelect, codeModelSelect, deleteModelSelect].forEach(sel => {
+                sel.innerHTML = sel.id === 'delete-model-select' ? 
+                    '<option value="" disabled selected>Select model to delete...</option>' : '';
             });
+            
+            if (models.length > 0) {
+                models.forEach(model => {
+                    [chatModelSelect, codeModelSelect, deleteModelSelect].forEach(sel => 
+                        sel.add(new Option(model.name, model.name))
+                    );
+                });
+                chatModelSelect.value = selections.chat;
+                codeModelSelect.value = selections.code;
+                deleteModelSelect.value = selections.delete;
+            } else {
+                const noModelOption = new Option("No models found", "", true, true);
+                chatModelSelect.add(noModelOption.cloneNode(true));
+                codeModelSelect.add(noModelOption.cloneNode(true));
+            }
         } catch (error) {
             console.error("Error fetching Ollama models:", error);
-            render.chatMessage('error', `Could not fetch models. ${error.message}`);
+            addMessageToHistory('error', `Could not fetch models. ${error.message}`);
         }
     };
 
-    // --- Core Logic ---
-    function cleanAndParseJson(rawText) {
-        // Find the first '{' and the last '}' to extract the JSON object
-        const startIndex = rawText.indexOf('{');
-        const endIndex = rawText.lastIndexOf('}');
-        if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
-            throw new Error("Could not find a valid JSON object in the response.");
-        }
-        const jsonString = rawText.substring(startIndex, endIndex + 1);
-        return JSON.parse(jsonString);
-    }
-
-    async function handleSendMessage(e) {
-        e.preventDefault();
-        const userPrompt = dom.chatInput.value.trim();
-        if (!userPrompt || state.isLoading || !state.activeProject) return;
-
-        dom.chatInput.value = '';
-        render.chatMessage('user', userPrompt);
-        state.chatHistory.push({ role: 'user', content: userPrompt });
-        actions.setLoading(true);
-
-        try {
-            const codeModel = dom.codeModelSelect.value;
-            let fullPrompt = `Available static assets: [${state.assets.join(', ')}]\n\nUse code generation model '${codeModel}' to generate the files.\n\nRequest: ${userPrompt}`;
-            
-            const modelMessages = [
-                { role: 'system', content: CHAT_SYSTEM_PROMPT },
-                ...state.chatHistory.slice(-10), // Keep context manageable
-                { role: 'user', content: fullPrompt }
-            ];
-
-            const rawResponse = await api.proxy('/api/chat', 'POST', { model: dom.chatModelSelect.value, messages: modelMessages, stream: false });
-            
-            const aiResponseJson = cleanAndParseJson(rawResponse);
-
-            state.chatHistory.push({ role: 'assistant', content: JSON.stringify(aiResponseJson) });
-            render.chatMessage('model', aiResponseJson.response_for_user);
-
-            if (aiResponseJson.file_operations) {
-                render.chatMessage('system', 'Applying file operations...');
-                for (const op of aiResponseJson.file_operations) {
-                    await api.saveFile(state.activeProject, op.path, op.content);
-                    if (state.openFiles.has(op.path)) {
-                        const file = state.openFiles.get(op.path);
-                        file.content = op.content;
-                        file.editorEl.querySelector('textarea').value = op.content;
-                    }
-                }
-                await actions.refreshFileTree();
-                render.chatMessage('system', 'File operations complete.');
-                render.preview();
+    // Session Management
+    const renderSessionList = () => {
+        sessionListEl.innerHTML = '';
+        if (chatSessions.length === 0) return;
+        
+        chatSessions.forEach(session => {
+            const sessionBtn = document.createElement('button');
+            sessionBtn.classList.add('session-item');
+            sessionBtn.textContent = session.title;
+            sessionBtn.dataset.sessionId = session.id;
+            if (session.id === activeSessionId) {
+                sessionBtn.classList.add('active-session');
             }
-        } catch (error) {
-            console.error("Error processing AI response:", error);
-            render.chatMessage('error', `An error occurred: ${error.message}. Check the browser console for details.`);
-        } finally {
-            actions.setLoading(false);
-        }
-    }
+            sessionBtn.addEventListener('click', () => loadSession(session.id));
+            sessionListEl.prepend(sessionBtn);
+        });
+    };
     
-    // --- Ollama Settings Handlers ---
-    function showStatusMessage(element, message, type = 'info', duration = 4000) {
-        element.textContent = message;
-        element.className = `status-message ${type}`;
-        if (duration) setTimeout(() => { element.textContent = ''; element.className = 'status-message'; }, duration);
-    }
-    dom.pullModelForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const modelName = dom.pullModelName.value.trim();
-        if (!modelName) return;
-        showStatusMessage(dom.pullStatus, `Pulling "${modelName}"...`, 'info', null);
-        try {
-            await api.proxy('/api/pull', 'POST', { name: modelName, stream: false });
-            showStatusMessage(dom.pullStatus, `Successfully pulled "${modelName}".`, 'success');
-            dom.pullModelName.value = '';
-            await actions.fetchOllamaModels(true);
-        } catch (error) {
-            showStatusMessage(dom.pullStatus, `Error: ${error.message}`, 'error');
-        }
-    });
-    dom.createModelForm.addEventListener('submit', async (e) => { /* ... similar logic ... */ });
-    dom.deleteModelForm.addEventListener('submit', async (e) => { /* ... similar logic ... */ });
+    const loadSession = (sessionId) => {
+        const session = chatSessions.find(s => s.id === sessionId);
+        if (!session) return;
 
-    // --- Event Listeners Setup ---
-    function setupEventListeners() {
-        // ... (all previous event listeners)
-        dom.newProjectBtn.addEventListener('click', () => { /* ... */ });
-        dom.projectList.addEventListener('click', (e) => { /* ... */ });
-        dom.fileTree.addEventListener('click', (e) => { /* ... */ });
-        dom.editorTabs.addEventListener('click', (e) => { /* ... */ });
-        dom.chatForm.addEventListener('submit', handleSendMessage);
-        dom.refreshPreviewBtn.addEventListener('click', render.preview);
-        let saveTimeout;
-        dom.editorContent.addEventListener('input', (e) => { clearTimeout(saveTimeout); saveTimeout = setTimeout(actions.saveActiveFile, 1000); });
-        
-        // Asset Upload
-        dom.assetUploadBtn.addEventListener('click', () => dom.assetUploadInput.click());
-        dom.assetUploadInput.addEventListener('change', async (e) => {
-            if (e.target.files.length === 0) return;
-            const formData = new FormData();
-            formData.append('assetFile', e.target.files[0]);
-            try {
-                await api.uploadAsset(formData);
-                await actions.loadAssets();
-            } catch (error) {
-                alert(`Error uploading asset: ${error.message}`);
-            }
-        });
+        activeSessionId = sessionId;
+        chatModelHistory = session.modelHistory;
+        conversationState = { ...session.conversationState };
+        currentProjectId = session.projectId || null;
 
-        // Tab Switchers
-        document.getElementById('left-sidebar').addEventListener('click', (e) => { /* ... */ });
-        document.getElementById('right-sidebar').addEventListener('click', (e) => { /* ... */ });
-        document.querySelector('.editor-panel').addEventListener('click', (e) => { /* ... */ });
-        
-        dom.refreshModelsBtn.addEventListener('click', () => actions.fetchOllamaModels(true));
-    }
-    // Re-add full event listeners
-    function setupFullEventListeners() {
-        dom.newProjectBtn.addEventListener('click', async () => {
-            const projectName = dom.newProjectNameInput.value.trim();
-            if (!projectName.match(/^[a-zA-Z0-9_-]+$/)) return alert("Invalid project name.");
-            await api.createProject(projectName);
-            dom.newProjectNameInput.value = '';
-            await actions.loadProjects();
-            await actions.setActiveProject(projectName);
-        });
-        dom.projectList.addEventListener('click', (e) => {
-            const target = e.target.closest('.sidebar-item');
-            if (target) actions.setActiveProject(target.dataset.projectId);
-        });
-        dom.fileTree.addEventListener('click', (e) => {
-            const file = e.target.closest('.file-item');
-            if (file) { actions.openFile(file.dataset.path); return; }
-            const dir = e.target.closest('.dir-name');
-            if (dir) { const c = dir.nextElementSibling; if (c) c.classList.toggle('collapsed'); }
-        });
-        dom.editorTabs.addEventListener('click', (e) => {
-            const tab = e.target.closest('.editor-tab');
-            if (!tab) return;
-            if (e.target.classList.contains('close-tab-btn')) actions.closeFile(tab.dataset.path);
-            else actions.setActiveFile(tab.dataset.path);
-        });
-        dom.chatForm.addEventListener('submit', handleSendMessage);
-        dom.refreshPreviewBtn.addEventListener('click', render.preview);
-        let saveTimeout;
-        dom.editorContent.addEventListener('input', () => { clearTimeout(saveTimeout); saveTimeout = setTimeout(actions.saveActiveFile, 1000); });
-        
-        dom.assetUploadBtn.addEventListener('click', () => dom.assetUploadInput.click());
-        dom.assetUploadInput.addEventListener('change', async (e) => {
-            if (e.target.files.length === 0) return;
-            const formData = new FormData();
-            formData.append('assetFile', e.target.files[0]);
-            try {
-                await api.uploadAsset(formData);
-                await actions.loadAssets();
-            } catch (error) { alert(`Error uploading asset: ${error.message}`); }
-        });
-        
-        // Tab Switchers
-        const setupTabSwitcher = (containerSelector) => {
-            document.querySelector(containerSelector).addEventListener('click', e => {
-                const btn = e.target.closest('.tab-button');
-                if (btn) {
-                    btn.parentElement.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    const viewContainer = btn.closest('.panel, .editor-panel');
-                    viewContainer.querySelectorAll(':scope > .tab-content').forEach(c => c.classList.remove('active-content'));
-                    document.getElementById(btn.id.replace('-btn', '-view')).classList.add('active-content');
+        chatHistoryEl.innerHTML = '';
+        if (chatModelHistory.length === 0) {
+            chatHistoryEl.appendChild(welcomeMessage);
+            welcomeMessage.style.display = 'block';
+        } else {
+            welcomeMessage.style.display = 'none';
+            chatModelHistory.forEach(msg => {
+                if (msg.role !== 'system') {
+                    addMessageToHistory(msg.role === 'assistant' ? 'model' : msg.role, msg.content);
                 }
             });
-        };
-        setupTabSwitcher('#left-sidebar');
-        setupTabSwitcher('#right-sidebar');
-        setupTabSwitcher('.editor-panel');
+        }
+        
+        updateCodePanels(conversationState.currentCode || '');
+        if (conversationState.currentManifest) {
+            manifestJsonEl.value = JSON.stringify(conversationState.currentManifest, null, 2);
+        }
+        renderSessionList();
+        if (currentProjectId) refreshFileTree();
+    };
 
-        dom.refreshModelsBtn.addEventListener('click', () => actions.fetchOllamaModels(true));
-         // Fill in missing Ollama form handlers
-        dom.createModelForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const modelName = dom.createModelName.value.trim();
-            const modelfile = dom.createModelfile.value.trim();
-            if (!modelName || !modelfile) return;
-            showStatusMessage(dom.createStatus, `Creating "${modelName}"...`, 'info', null);
-            try {
-                await api.proxy('/api/create', 'POST', { name: modelName, modelfile: modelfile, stream: false });
-                showStatusMessage(dom.createStatus, `Successfully created "${modelName}".`, 'success');
-                dom.createModelName.value = '';
-                dom.createModelfile.value = '';
-                await actions.fetchOllamaModels(true);
-            } catch (error) {
-                showStatusMessage(dom.createStatus, `Error: ${error.message}`, 'error');
+    const saveActiveSession = () => {
+        const session = chatSessions.find(s => s.id === activeSessionId);
+        if (!session) return;
+        
+        session.modelHistory = [...chatModelHistory];
+        session.conversationState = { ...conversationState };
+        session.projectId = currentProjectId;
+        
+        if (session.title === "New Project" && conversationState.lastUserPrompt) {
+            session.title = conversationState.lastUserPrompt.substring(0, 25) + 
+                          (conversationState.lastUserPrompt.length > 25 ? '...' : '');
+        }
+        
+        renderSessionList();
+    };
+
+    const handleNewChat = () => {
+        const newSession = {
+            id: Date.now(),
+            title: "New Project",
+            modelHistory: [],
+            projectId: null,
+            conversationState: {
+                isModifying: false,
+                awaitingPlanConfirmation: false,
+                lastUserPrompt: null,
+                currentPlan: null,
+                currentCode: null,
+                currentManifest: null
             }
-        });
-        dom.deleteModelForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const modelName = dom.deleteModelSelect.value;
-            if (!modelName) return;
-            if (confirm(`Are you sure you want to delete "${modelName}"?`)) {
-                showStatusMessage(dom.deleteStatus, `Deleting "${modelName}"...`, 'info', null);
-                try {
-                    await api.proxy('/api/delete', 'DELETE', { name: modelName });
-                    showStatusMessage(dom.deleteStatus, `Successfully deleted "${modelName}".`, 'success');
-                    await actions.fetchOllamaModels(true);
-                } catch (error) {
-                    showStatusMessage(dom.deleteStatus, `Error: ${error.message}`, 'error');
+        };
+        chatSessions.push(newSession);
+        loadSession(newSession.id);
+    };
+
+    // UI Update Functions
+    const addMessageToHistory = (role, content) => {
+        if (typeof content !== 'string') {
+            console.error(`Invalid content for role '${role}':`, content);
+            content = "Error: Received invalid message content.";
+        }
+
+        welcomeMessage.style.display = 'none';
+        const messageEl = document.createElement('div');
+        messageEl.classList.add('chat-message', `${role}-message`);
+        const contentEl = document.createElement('div');
+        contentEl.classList.add('message-content');
+        contentEl.innerHTML = content.replace(/\n/g, '<br>');
+        messageEl.appendChild(contentEl);
+        
+        if (role === 'model' || role === 'user') {
+            const replayBtn = document.createElement('button');
+            replayBtn.classList.add('replay-tts-btn');
+            replayBtn.title = 'Replay audio';
+            replayBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+            </svg>`;
+            replayBtn.onclick = () => speak(content);
+            messageEl.appendChild(replayBtn);
+        }
+        
+        chatHistoryEl.appendChild(messageEl);
+        chatHistoryEl.scrollTop = chatHistoryEl.scrollHeight;
+    };
+
+    const addIntermediaryMessage = (summaryText, detailsText) => {
+        welcomeMessage.style.display = 'none';
+        const messageEl = document.createElement('details');
+        messageEl.classList.add('chat-message', 'intermediary-message');
+        const summaryEl = document.createElement('summary');
+        summaryEl.textContent = summaryText;
+        const detailsContentEl = document.createElement('div');
+        detailsContentEl.classList.add('details-content');
+        detailsContentEl.textContent = detailsText;
+        messageEl.appendChild(summaryEl);
+        messageEl.appendChild(detailsContentEl);
+        chatHistoryEl.appendChild(messageEl);
+        chatHistoryEl.scrollTop = chatHistoryEl.scrollHeight;
+        return { messageEl, summaryEl, detailsContentEl };
+    };
+
+    const resetConversationState = () => {
+        conversationState = { 
+            isModifying: false, 
+            awaitingPlanConfirmation: false, 
+            lastUserPrompt: null, 
+            currentPlan: null, 
+            currentCode: null,
+            currentManifest: null 
+        };
+        chatModelHistory = [];
+        modificationArea.style.display = 'none';
+        chatInput.placeholder = "Describe a new app or game...";
+    };
+
+    // Enhanced JSON Parser
+    const tryParsePMJson = (raw) => {
+        // Direct parse
+        try { return JSON.parse(raw); } catch {}
+        
+        // Strip markdown code blocks
+        let s = raw.trim();
+        s = s.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+        try { return JSON.parse(s); } catch {}
+        
+        // Find JSON object boundaries
+        const first = s.indexOf('{');
+        const last = s.lastIndexOf('}');
+        if (first !== -1 && last !== -1 && last > first) {
+            const sub = s.slice(first, last + 1);
+            try { return JSON.parse(sub); } catch {}
+        }
+        
+        // Try to fix common issues
+        if (s.includes("{") && s.includes("}")) {
+            // Fix single quotes
+            let guess = s.replace(/'/g, '"');
+            // Fix unquoted keys
+            guess = guess.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+            try { return JSON.parse(guess); } catch {}
+        }
+        
+        return null;
+    };
+
+    // Fallback JSON coercion via model
+    const coerceJsonViaModel = async (chatModel, rawContent) => {
+        try {
+            const schemaHint = `Output ONLY valid JSON matching one of these structures:
+1) {"response_for_user": "...", "plan": "...", "manifest": {"files":[{"path":"...","intent":"..."}]}}
+2) {"PROCEED_TO_CODE": true}
+3) {"response_for_user": "...", "modification_instruction": "..."}`;
+            
+            const repairMessages = [
+                { role: 'system', content: "Convert text to STRICT JSON. Output only JSON." },
+                { role: 'user', content: `${schemaHint}\n\nInput:\n${rawContent}` }
+            ];
+            
+            const fixedRaw = await fetchFromProxy('/api/chat', 'POST', {
+                model: chatModel,
+                messages: repairMessages,
+                stream: false,
+                format: 'json'
+            });
+            
+            const content = fixedRaw?.message?.content || "";
+            return tryParsePMJson(content);
+        } catch (e) {
+            return null;
+        }
+    };
+
+    // Core Conversation Logic
+    const handleSendMessage = async (e) => {
+        e.preventDefault();
+        const userPrompt = chatInput.value.trim();
+        if (!userPrompt || isLoading) return;
+
+        addMessageToHistory('user', userPrompt);
+        speak(userPrompt);
+        chatInput.value = '';
+        chatInput.style.height = 'auto';
+
+        if (!conversationState.awaitingPlanConfirmation) {
+            resetConversationState();
+            conversationState.lastUserPrompt = userPrompt;
+            projectBriefEl.value = userPrompt; // Auto-fill project brief
+            chatModelHistory.push(chatSystemPrompt, { role: 'user', content: userPrompt });
+        } else {
+            chatModelHistory.push({ role: 'user', content: userPrompt });
+        }
+        
+        saveActiveSession();
+        await processChatter();
+    };
+    
+    const handleCodeModification = async (e) => {
+        e.preventDefault();
+        const userPrompt = modificationInput.value.trim();
+        if (!userPrompt || isLoading) return;
+        
+        addMessageToHistory('user', userPrompt);
+        speak(userPrompt);
+        modificationInput.value = '';
+        modificationInput.style.height = 'auto';
+
+        chatModelHistory.push({ role: 'user', content: userPrompt });
+        saveActiveSession();
+        await processChatter();
+    };
+
+    const processChatter = async () => {
+        setLoading(true);
+        const chatModel = chatModelSelect.value;
+        const codeModel = codeModelSelect.value;
+        
+        if (!chatModel || !codeModel) {
+            addMessageToHistory('error', 'Please select both a Chat and a Code model.');
+            setLoading(false);
+            return;
+        }
+
+        const thinkingMessage = addIntermediaryMessage('Contacting project manager...', 'Processing request...');
+        
+        try {
+            const chatResponseRaw = await fetchFromProxy('/api/chat', 'POST', {
+                model: chatModel,
+                messages: chatModelHistory,
+                stream: false,
+                format: 'json'
+            });
+            
+            const chatResponseContent = chatResponseRaw.message.content;
+            chatModelHistory.push({ role: 'assistant', content: chatResponseContent });
+            
+            let chatResponse = tryParsePMJson(chatResponseContent);
+            if (!chatResponse) {
+                chatResponse = await coerceJsonViaModel(chatModel, chatResponseContent);
+            }
+            
+            if (!chatResponse) {
+                thinkingMessage.summaryEl.textContent = "Error: Invalid Response";
+                thinkingMessage.detailsContentEl.textContent = chatResponseContent;
+                throw new Error("Invalid response format. Please try again.");
+            }
+
+            if (chatResponse.plan) {
+                thinkingMessage.summaryEl.textContent = "Received Execution Plan";
+                thinkingMessage.detailsContentEl.textContent = chatResponse.plan;
+                addMessageToHistory('model', chatResponse.response_for_user || 'Plan ready. Confirm to proceed.');
+                speak(chatResponse.response_for_user);
+                conversationState.currentPlan = chatResponse.plan;
+                conversationState.awaitingPlanConfirmation = true;
+                
+                if (chatResponse.manifest) {
+                    conversationState.currentManifest = chatResponse.manifest;
+                    manifestJsonEl.value = JSON.stringify(chatResponse.manifest, null, 2);
+                }
+                
+            } else if (chatResponse.PROCEED_TO_CODE) {
+                conversationState.awaitingPlanConfirmation = false;
+                
+                // Auto-initialize project if not exists
+                if (!currentProjectId && conversationState.lastUserPrompt) {
+                    await initializeProject();
+                }
+                
+                const codePrompt = `Original Request: "${conversationState.lastUserPrompt}"
+                
+Execution Plan:
+${conversationState.currentPlan}
+
+Create a complete, working implementation. For Phaser games, use version 3.88.`;
+                
+                thinkingMessage.summaryEl.textContent = "Generating code...";
+                thinkingMessage.detailsContentEl.textContent = codePrompt;
+                
+                const codeMessages = [codeSystemPrompt, { role: 'user', content: codePrompt }];
+                const codeResponse = await fetchFromProxy('/api/chat', 'POST', { 
+                    model: codeModel, 
+                    messages: codeMessages, 
+                    stream: false 
+                });
+                
+                updateCodePanels(codeResponse.message.content);
+                addMessageToHistory('model', '✅ Code generated successfully! Check the Code tab.');
+                
+                // Save to project if exists
+                if (currentProjectId) {
+                    await saveToProject('index.html', codeResponse.message.content);
+                }
+                
+            } else if (chatResponse.modification_instruction) {
+                thinkingMessage.summaryEl.textContent = "Applying modification...";
+                thinkingMessage.detailsContentEl.textContent = chatResponse.modification_instruction;
+                addMessageToHistory('model', chatResponse.response_for_user || 'Modifying code...');
+                speak(chatResponse.response_for_user);
+                
+                const codeMessages = [
+                    codeSystemPrompt, 
+                    { role: 'user', content: `EXISTING_CODE:\n\n${conversationState.currentCode}\n\nModification: "${chatResponse.modification_instruction}"` }
+                ];
+                
+                const codeResponse = await fetchFromProxy('/api/chat', 'POST', { 
+                    model: codeModel, 
+                    messages: codeMessages, 
+                    stream: false 
+                });
+                
+                updateCodePanels(codeResponse.message.content);
+                
+                if (currentProjectId) {
+                    await saveToProject('index.html', codeResponse.message.content);
                 }
             }
+
+        } catch (error) {
+            console.error("Error during chat processing:", error);
+            addMessageToHistory('error', error.message);
+        } finally {
+            saveActiveSession();
+            setLoading(false);
+        }
+    };
+
+    const updateCodePanels = (code) => {
+        conversationState.currentCode = (code && code.trim() !== '') ? code : null;
+        
+        if (conversationState.currentCode) {
+            codePlaceholder.style.display = 'none';
+            previewPlaceholder.style.display = 'none';
+            codeBlock.textContent = conversationState.currentCode;
+            previewFrame.srcdoc = conversationState.currentCode;
+            
+            const codeContextMessage = { 
+                role: 'system', 
+                content: `EXISTING_CODE:\n${conversationState.currentCode}` 
+            };
+            
+            const codeContextIndex = chatModelHistory.findIndex(
+                msg => msg.role === 'system' && msg.content.startsWith('EXISTING_CODE')
+            );
+            
+            if (codeContextIndex > -1) {
+                chatModelHistory[codeContextIndex] = codeContextMessage;
+            } else {
+                chatModelHistory.push(codeContextMessage);
+            }
+            
+            modificationArea.style.display = 'block';
+        } else {
+            codePlaceholder.style.display = 'flex';
+            previewPlaceholder.style.display = 'flex';
+            codeBlock.textContent = '';
+            previewFrame.srcdoc = '';
+            modificationArea.style.display = 'none';
+        }
+        saveActiveSession();
+    };
+
+    const setLoading = (state) => {
+        isLoading = state;
+        sendButton.disabled = state;
+        modificationSendButton.disabled = state;
+        sendButton.style.opacity = state ? 0.5 : 1.0;
+        modificationSendButton.style.opacity = state ? 0.5 : 1.0;
+    };
+
+    const switchTab = (targetTabId) => {
+        tabs.forEach(tab => tab.classList.toggle('active', tab.id === `${targetTabId}-tab`));
+        tabContents.forEach(content => content.classList.toggle('active-content', content.id === `${targetTabId}-view`));
+    };
+
+    const copyCodeToClipboard = () => {
+        if (navigator.clipboard && codeBlock.textContent) {
+            navigator.clipboard.writeText(codeBlock.textContent).then(() => {
+                copyCodeBtn.textContent = 'Copied!';
+                setTimeout(() => { copyCodeBtn.textContent = 'Copy'; }, 2000);
+            });
+        }
+    };
+    
+    const autoResizeTextarea = (el) => {
+        el.style.height = 'auto';
+        el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    };
+
+    // Settings Panel Logic
+    const showStatusMessage = (element, message, type = 'info', duration = 4000) => {
+        element.textContent = message;
+        element.className = `status-message ${type}`;
+        setTimeout(() => { 
+            element.textContent = ''; 
+            element.className = 'status-message'; 
+        }, duration);
+    };
+
+    // Project API Integration
+    const postJSON = async (url, body) => {
+        const response = await fetch(url, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(body) 
+        });
+        return response.json();
+    };
+
+    const getJSON = async (url) => {
+        const response = await fetch(url);
+        return response.json();
+    };
+
+    const renderTree = (data) => {
+        const { manifest, files } = data || {};
+        fileTreeEl.innerHTML = '';
+        const ul = document.createElement('ul');
+        ul.style.listStyle = 'none';
+        ul.style.paddingLeft = '0';
+        
+        const addItem = (label, path) => {
+            const li = document.createElement('li');
+            li.style.padding = '4px 6px';
+            li.style.cursor = 'pointer';
+            li.textContent = label;
+            li.addEventListener('click', () => {
+                _selectedPath = path;
+                [...fileTreeEl.querySelectorAll('li')].forEach(n => 
+                    n.style.background = 'transparent'
+                );
+                li.style.background = 'rgba(255,255,255,0.06)';
+            });
+            ul.appendChild(li);
+        };
+        
+        const paths = (manifest && manifest.files ? 
+            manifest.files.map(f => f.path) : []) || files || [];
+        (paths || []).forEach(p => addItem(p, p));
+        fileTreeEl.appendChild(ul);
+    };
+
+    const refreshFileTree = async () => {
+        if (!currentProjectId) {
+            fileTreeEl.innerHTML = '<em>No project initialized.</em>';
+            return;
+        }
+        const data = await getJSON(`/api/project/tree?projectId=${encodeURIComponent(currentProjectId)}`);
+        renderTree(data);
+    };
+
+    const initializeProject = async () => {
+        const brief = projectBriefEl?.value?.trim() || conversationState.lastUserPrompt || '';
+        const name = projectNameInput?.value?.trim() || 'Phaser Game Project';
+        
+        if (!chatModelSelect?.value || !codeModelSelect?.value) {
+            addMessageToHistory('error', 'Please select both Chat and Code models.');
+            return;
+        }
+        
+        const r = await postJSON('/api/project/init', {
+            name, 
+            brief,
+            chat_model: chatModelSelect.value,
+            code_model: codeModelSelect.value
+        });
+        
+        if (r.projectId) {
+            currentProjectId = r.projectId;
+            addMessageToHistory('model', `✅ Project initialized: ${currentProjectId}`);
+            
+            // Save plan and manifest if available
+            if (conversationState.currentPlan && conversationState.currentManifest) {
+                await postJSON('/api/project/manifest', {
+                    projectId: currentProjectId,
+                    plan: conversationState.currentPlan,
+                    manifest: conversationState.currentManifest
+                });
+            }
+            
+            refreshFileTree();
+            saveActiveSession();
+        } else {
+            addMessageToHistory('error', 'Project initialization failed.');
+        }
+    };
+
+    const saveToProject = async (path, content) => {
+        if (!currentProjectId) return;
+        
+        await postJSON('/api/project/save', {
+            projectId: currentProjectId,
+            path: path,
+            content: content,
+            summarize: summarizeOnSave,
+            chat_model: chatModelSelect.value
+        });
+        
+        refreshFileTree();
+    };
+
+    // Event Listeners - Critical for UI functionality!
+    newChatBtn.addEventListener('click', handleNewChat);
+    chatForm.addEventListener('submit', handleSendMessage);
+    modificationForm.addEventListener('submit', handleCodeModification);
+
+    chatInput.addEventListener('input', () => autoResizeTextarea(chatInput));
+    modificationInput.addEventListener('input', () => autoResizeTextarea(modificationInput));
+
+    chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { 
+            e.preventDefault(); 
+            handleSendMessage(e); 
+        }
+    });
+    
+    modificationInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { 
+            e.preventDefault(); 
+            handleCodeModification(e); 
+        }
+    });
+
+    refreshModelsBtn.addEventListener('click', fetchOllamaModels);
+    copyCodeBtn.addEventListener('click', copyCodeToClipboard);
+    
+    // Tab switching
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const targetId = tab.id.replace('-tab', '');
+            switchTab(targetId);
+        });
+    });
+
+    // Project Management Event Listeners
+    if (initProjectBtn) {
+        initProjectBtn.addEventListener('click', async () => {
+            await initializeProject();
         });
     }
 
-    // --- App Initialization ---
-    async function init() {
-        await actions.fetchOllamaModels(true);
-        await actions.loadProjects();
-        await actions.loadExamples();
-        await actions.loadAssets();
-        setupFullEventListeners();
-        console.log("Studio42 Initialized.");
+    if (confirmPlanBtn) {
+        confirmPlanBtn.addEventListener('click', async () => {
+            if (!currentProjectId) {
+                addMessageToHistory('error', 'Create a project first.');
+                return;
+            }
+            
+            const plan = (conversationState?.currentPlan || '').trim();
+            let manifestObj = {};
+            try {
+                manifestObj = JSON.parse(manifestJsonEl.value.trim() || '{}');
+            } catch {
+                addMessageToHistory('error', 'Manifest JSON is invalid.');
+                return;
+            }
+            
+            const r = await postJSON('/api/project/manifest', {
+                projectId: currentProjectId,
+                plan,
+                manifest: manifestObj
+            });
+            
+            if (r.ok) {
+                addMessageToHistory('model', '✅ Plan & manifest saved.');
+                refreshFileTree();
+            } else {
+                addMessageToHistory('error', 'Failed saving manifest.');
+            }
+        });
     }
 
-    init();
-});
+    if (generateSelectedBtn) {
+        generateSelectedBtn.addEventListener('click', async () => {
+            if (!currentProjectId) {
+                addMessageToHistory('error', 'Create a project first.');
+                return;
+            }
+            if (!_selectedPath) {
+                addMessageToHistory('error', 'Select a file to generate.');
+                return;
+            }
+            
+            const r = await postJSON('/api/project/generate', {
+                projectId: currentProjectId,
+                path: _selectedPath,
+                chat_model: chatModelSelect.value,
+                code_model: codeModelSelect.value
+            });
+            
+            if (r.ok) {
+                addMessageToHistory('model', `✅ Generated: ${r.path}`);
+                await saveToProject(r.path, r.content);
+                refreshFileTree();
+                updateCodePanels(r.content);
+                switchTab('code');
+            } else {
+                addMessageToHistory('error', r.error || 'Generation failed.');
+            }
+        });
+    }
 
+    if (summarizeToggle) {
+        summarizeToggle.addEventListener('click', () => {
+            summarizeOnSave = !summarizeOnSave;
+            summarizeToggle.textContent = summarizeOnSave ? 'Summarize on Save' : 'No Summaries';
+        });
+    }
+
+    // Settings Event Listeners
+    pullModelForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const modelName = pullModelName.value.trim();
+        if (!modelName) return;
+        showStatusMessage(pullStatus, `Pulling "${modelName}"... This may take a while.`, 'info', 60000);
+        try {
+            await fetchFromProxy('/api/pull', 'POST', { name: modelName, stream: false });
+            showStatusMessage(pullStatus, `Successfully pulled "${modelName}".`, 'success');
+            pullModelName.value = '';
+            fetchOllamaModels();
+        } catch (error) {
+            showStatusMessage(pullStatus, `Error pulling model: ${error.message}`, 'error');
+        }
+    });
+
+    createModelForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const modelName = createModelName.value.trim();
+        const modelfile = createModelfile.value.trim();
+        if (!modelName || !modelfile) return;
+        showStatusMessage(createStatus, `Creating "${modelName}"...`, 'info', 60000);
+        try {
+            await fetchFromProxy('/api/create', 'POST', { 
+                name: modelName, 
+                modelfile: modelfile, 
+                stream: false 
+            });
+            showStatusMessage(createStatus, `Successfully created "${modelName}".`, 'success');
+            createModelName.value = '';
+            createModelfile.value = '';
+            fetchOllamaModels();
+        } catch (error) {
+            showStatusMessage(createStatus, `Error creating model: ${error.message}`, 'error');
+        }
+    });
+    
+    deleteModelForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const modelName = deleteModelSelect.value;
+        if (!modelName) {
+            showStatusMessage(manageStatus, 'Please select a model to delete.', 'error');
+            return;
+        }
+        if (confirm(`Are you sure you want to permanently delete the model "${modelName}"?`)) {
+            try {
+                await fetchFromProxy('/api/delete', 'DELETE', { name: modelName });
+                showStatusMessage(manageStatus, `Successfully deleted "${modelName}".`, 'success');
+                fetchOllamaModels();
+            } catch (error) {
+                showStatusMessage(manageStatus, `Error deleting model: ${error.message}`, 'error');
+            }
+        }
+    });
+
+    // Initial Load - Start everything up!
+    fetchOllamaModels();
+    handleNewChat(); // Start with a fresh session
+});
