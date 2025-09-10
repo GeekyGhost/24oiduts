@@ -1,216 +1,477 @@
-import os
-import shutil
-import requests
-import subprocess
+import os, json, hashlib, pathlib, datetime, requests
 from flask import Flask, request, jsonify, render_template, abort, send_from_directory
-from werkzeug.utils import secure_filename
-import json
+from flask_cors import CORS
 
-# Initialize the Flask application
-app = Flask(__name__, static_folder='static', template_folder='templates')
+app = Flask(__name__, static_folder='static', template_folder='static')
+CORS(app)  # Enable CORS for better API handling
 
-# --- CONFIGURATION ---
 OLLAMA_API_URL = os.environ.get('OLLAMA_API_URL', 'http://localhost:11434')
-PROJECTS_BASE_DIR = os.path.join(os.getcwd(), 'projects')
-STATIC_DIR = os.path.join(os.getcwd(), 'static')
-ASSETS_DIR = os.path.join(STATIC_DIR, 'assets')
-EXAMPLES_DIR = os.path.join(STATIC_DIR, 'examples')
-PHASER_DIR = os.path.join(STATIC_DIR, 'phaser')
-PHASER_FILE_PATH = os.path.join(PHASER_DIR, 'phaser.min.js')
-PHASER_CDN_URL = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js'
-PHASER_EXAMPLES_REPO = 'https://github.com/photonstorm/phaser3-examples.git'
 
-# --- HELPER FUNCTIONS ---
-def setup_directories():
-    """Ensure all necessary static directories exist."""
-    os.makedirs(PROJECTS_BASE_DIR, exist_ok=True)
-    os.makedirs(ASSETS_DIR, exist_ok=True)
-    os.makedirs(EXAMPLES_DIR, exist_ok=True)
-    os.makedirs(PHASER_DIR, exist_ok=True)
+# --- Projects workspace
+BASE_DIR = pathlib.Path(__file__).parent.resolve()
+PROJECTS_DIR = BASE_DIR / "projects"
+PROJECTS_DIR.mkdir(exist_ok=True)
+STATIC_DIR = BASE_DIR / "static"
+STATIC_DIR.mkdir(exist_ok=True)
 
-def setup_phaser():
-    """Checks for Phaser and downloads it if missing."""
-    if not os.path.exists(PHASER_FILE_PATH):
-        print("[INFO] Phaser not found. Downloading from CDN...")
-        try:
-            with requests.get(PHASER_CDN_URL, stream=True) as r:
-                r.raise_for_status()
-                with open(PHASER_FILE_PATH, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-            print("[SUCCESS] Phaser downloaded successfully.")
-        except Exception as e:
-            print(f"[ERROR] Failed to download Phaser: {e}")
+def _safe_join(project_id: str, rel_path: str) -> pathlib.Path:
+    """Safely join paths preventing directory traversal"""
+    root = PROJECTS_DIR / project_id
+    root.mkdir(exist_ok=True)
+    p = (root / rel_path).resolve()
+    if not str(p).startswith(str(root)):
+        raise ValueError("Unsafe path.")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
-def setup_phaser_examples():
-    """Clones the Phaser examples repository if the directory is empty."""
-    if not os.listdir(EXAMPLES_DIR):
-        print(f"[INFO] Examples directory is empty. Cloning from {PHASER_EXAMPLES_REPO}...")
-        try:
-            subprocess.run(['git', 'clone', '--depth', '1', PHASER_EXAMPLES_REPO, EXAMPLES_DIR], check=True)
-            # Optional: Clean up .git directory to save space
-            git_dir = os.path.join(EXAMPLES_DIR, '.git')
-            if os.path.exists(git_dir):
-                shutil.rmtree(git_dir)
-            print("[SUCCESS] Phaser examples cloned successfully.")
-        except Exception as e:
-            print(f"[ERROR] Failed to clone Phaser examples: {e}")
-            print("[INFO] Please ensure Git is installed and in your system's PATH.")
+def _manifest_path(project_id: str) -> pathlib.Path:
+    return _safe_join(project_id, "project.json")
 
-def get_project_path(project_id):
-    """Get the full path for a project, ensuring it's within the base directory."""
-    if not project_id or '..' in project_id or '/' in project_id or '\\' in project_id:
-        return None
-    return os.path.join(PROJECTS_BASE_DIR, project_id)
+def _hash_content(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
-def get_file_tree(path):
-    """Recursively get the file tree for a given path."""
-    tree = []
-    base_project_path = path
-    if not os.path.exists(path):
-        return tree
-    for item in os.listdir(path):
-        item_path = os.path.join(path, item)
-        rel_path = os.path.relpath(item_path, base_project_path).replace('\\', '/')
-        node = {'name': item, 'path': rel_path}
-        if os.path.isdir(item_path):
-            node['type'] = 'directory'
-            node['children'] = get_file_tree(item_path)
-        else:
-            node['type'] = 'file'
-        tree.append(node)
-    return sorted(tree, key=lambda x: (x['type'], x['name']))
+def _load_manifest(project_id: str) -> dict:
+    mp = _manifest_path(project_id)
+    if not mp.exists():
+        return {}
+    return json.loads(mp.read_text(encoding="utf-8"))
 
-# --- CORE ROUTES ---
+def _save_manifest(project_id: str, data: dict):
+    _manifest_path(project_id).write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+def _relative_tree(project_id: str) -> list:
+    root = PROJECTS_DIR / project_id
+    if not root.exists():
+        return []
+    items = []
+    for p in root.rglob("*"):
+        if p.is_file() and not p.name.startswith('.'):
+            items.append(str(p.relative_to(root)))
+    return sorted(items)
+
+# Phaser-specific templates
+PHASER_GAME_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.88.0/dist/phaser.min.js"></script>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }}
+        #game-container {{
+            border: 2px solid #fff;
+            box-shadow: 0 0 20px rgba(0,0,0,0.4);
+        }}
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+    <script src="game.js"></script>
+</body>
+</html>"""
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/projects/<project_id>/<path:filepath>')
-def serve_project_file(project_id, filepath):
-    project_path = get_project_path(project_id)
-    if not project_path or not os.path.exists(project_path):
-        abort(404, "Project not found.")
-    return send_from_directory(project_path, filepath)
-
-# --- API: OLLAMA PROXY ---
 @app.route('/api/proxy', methods=['POST'])
 def ollama_proxy():
+    """Proxy requests to Ollama API"""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         target_path = data.get('path')
         body = data.get('body', {})
         method = data.get('method', 'POST')
+        
         if not target_path:
-            abort(400, "Missing 'path' in proxy request.")
+            abort(400, description="Missing 'path' in request to proxy.")
         
         full_url = f"{OLLAMA_API_URL}{target_path}"
-        response = requests.request(method, full_url, json=body, stream=False)
-        response.raise_for_status()
         
-        # Return raw text for chat, as it might not always be perfect JSON
-        if target_path == '/api/chat':
-             return response.text, response.status_code
-
-        return (response.json(), response.status_code) if response.content else (jsonify({"status": "success"}), response.status_code)
+        # Handle streaming for better performance with large models
+        if body.get('stream', False):
+            resp = requests.request(method, full_url, json=body, stream=True)
+            resp.raise_for_status()
+            
+            def generate():
+                for line in resp.iter_lines():
+                    if line:
+                        yield line.decode('utf-8') + '\n'
+            
+            return app.response_class(generate(), mimetype='text/event-stream')
+        else:
+            resp = requests.request(method, full_url, json=body, stream=False, timeout=120)
+            resp.raise_for_status()
+            return (jsonify(resp.json()), resp.status_code) if resp.content else (jsonify({'status': 'success'}), resp.status_code)
+            
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'Request to Ollama timed out. The model might be loading.'}), 504
     except requests.exceptions.RequestException as e:
-        return jsonify({"error": f"Could not connect to Ollama at {OLLAMA_API_URL}. Is it running?"}), 503
+        return jsonify({'error': f"Could not connect to Ollama at {OLLAMA_API_URL}. Is it running? Error: {str(e)}"}), 503
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({'error': f'An internal server error occurred: {str(e)}'}), 500
 
-# --- API: PROJECT & FILE MANAGEMENT ---
-@app.route('/api/projects', methods=['GET', 'POST'])
-def handle_projects():
-    if request.method == 'GET':
-        projects = [d for d in os.listdir(PROJECTS_BASE_DIR) if os.path.isdir(os.path.join(PROJECTS_BASE_DIR, d))]
-        return jsonify(sorted(projects))
-    if request.method == 'POST':
-        project_id = request.json.get('project_id')
-        project_path = get_project_path(project_id)
-        if not project_path:
-            abort(400, "Invalid project name.")
-        if os.path.exists(project_path):
-            abort(409, "Project already exists.")
+# --- Project API
+@app.route('/api/project/init', methods=['POST'])
+def project_init():
+    """Initialize a new project with Phaser support"""
+    data = request.get_json() or {}
+    name = data.get("name") or "Untitled Phaser Game"
+    brief = data.get("brief") or ""
+    chat_model = data.get("chat_model")
+    code_model = data.get("code_model")
+    project_type = data.get("type", "phaser")  # Default to Phaser
+    
+    project_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    root = PROJECTS_DIR / project_id
+    root.mkdir(exist_ok=True)
+    
+    manifest = {
+        "id": project_id,
+        "name": name,
+        "type": project_type,
+        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "chat_model": chat_model,
+        "code_model": code_model,
+        "brief": brief,
+        "plan": None,
+        "manifest": None,
+        "files": {},   # path -> {hash, summary, deps, size, lang}
+        "history": []
+    }
+    _save_manifest(project_id, manifest)
+    
+    # Create initial files based on project type
+    if project_type == "phaser":
+        # Create index.html from template
+        index_content = PHASER_GAME_TEMPLATE.format(title=name)
+        _safe_join(project_id, "index.html").write_text(index_content, encoding="utf-8")
+        manifest["files"]["index.html"] = {
+            "hash": _hash_content(index_content),
+            "size": len(index_content),
+            "lang": "html"
+        }
+    
+    # Create context document
+    _safe_join(project_id, "CONTEXT.md").write_text(
+        f"# Project Context: {name}\n\n"
+        f"## Type: {project_type}\n\n"
+        f"## Brief\n{brief}\n\n"
+        f"## Technical Stack\n"
+        f"- Phaser 3.88.0 (Latest)\n"
+        f"- ES6 JavaScript\n"
+        f"- HTML5 Canvas\n\n", 
+        encoding="utf-8"
+    )
+    
+    _save_manifest(project_id, manifest)
+    return jsonify({"projectId": project_id, "type": project_type})
+
+@app.route('/api/project/tree', methods=['GET'])
+def project_tree():
+    """Get project file tree"""
+    project_id = request.args.get("projectId")
+    if not project_id:
+        abort(400, description="Missing projectId")
+    
+    manifest = _load_manifest(project_id)
+    return jsonify({
+        "manifest": manifest.get("manifest"),
+        "files": _relative_tree(project_id),
+        "type": manifest.get("type", "generic")
+    })
+
+@app.route('/api/project/read', methods=['POST'])
+def project_read():
+    """Read a project file"""
+    data = request.get_json() or {}
+    project_id = data.get("projectId")
+    path = data.get("path")
+    
+    if not project_id or not path:
+        abort(400, description="Missing projectId or path")
+    
+    f = _safe_join(project_id, path)
+    if not f.exists():
+        abort(404, description="File not found")
+    
+    return jsonify({"content": f.read_text(encoding="utf-8")})
+
+@app.route('/api/project/save', methods=['POST'])
+def project_save():
+    """Save and optionally summarize a project file"""
+    data = request.get_json() or {}
+    project_id = data.get("projectId")
+    path = data.get("path")
+    content = data.get("content", "")
+    summarize = bool(data.get("summarize"))
+    chat_model = data.get("chat_model")
+    
+    if not project_id or not path:
+        abort(400, description="Missing projectId or path")
+    
+    f = _safe_join(project_id, path)
+    f.write_text(content, encoding="utf-8")
+    
+    mf = _load_manifest(project_id)
+    entry = mf["files"].get(path, {})
+    entry["hash"] = _hash_content(content)
+    entry["size"] = len(content)
+    entry["lang"] = pathlib.Path(path).suffix.lstrip(".").lower() or "text"
+    
+    # Detect Phaser usage
+    if "phaser" in content.lower():
+        entry["framework"] = "phaser"
+    
+    mf["files"][path] = entry
+    _save_manifest(project_id, mf)
+    
+    summary = None
+    if summarize and chat_model:
+        # Enhanced prompt for Phaser projects
+        prompt_addon = ""
+        if entry.get("framework") == "phaser":
+            prompt_addon = "\nFocus on: Phaser scenes, game objects, physics, input handling, and game loop logic."
         
-        os.makedirs(os.path.join(project_path, 'js'), exist_ok=True)
-        os.makedirs(os.path.join(project_path, 'assets'), exist_ok=True)
-        os.makedirs(os.path.join(project_path, 'css'), exist_ok=True)
+        prompt = f"""Summarize this {'Phaser game' if entry.get('framework') == 'phaser' else ''} file in <=10 lines:
+- Purpose and functionality
+- Key classes/functions
+- Dependencies
+- Public API{prompt_addon}
+
+```{entry.get('lang','text')}
+{content[:3000]}...
+```"""
         
-        if os.path.exists(PHASER_FILE_PATH):
-            shutil.copy(PHASER_FILE_PATH, project_path)
-        return jsonify({"status": "success", "project_id": project_id})
+        try:
+            r = requests.post(f"{OLLAMA_API_URL}/api/chat", json={
+                "model": chat_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False
+            }, timeout=30)
+            r.raise_for_status()
+            summary = (r.json().get("message") or {}).get("content")
+            entry["summary"] = summary
+            mf["files"][path] = entry
+            _save_manifest(project_id, mf)
+        except Exception as e:
+            print(f"Summarization failed: {e}")
+            summary = None
+    
+    return jsonify({
+        "saved": True, 
+        "hash": entry["hash"], 
+        "summary": summary,
+        "framework": entry.get("framework")
+    })
 
-@app.route('/api/projects/<project_id>', methods=['GET'])
-def get_project_files(project_id):
-    project_path = get_project_path(project_id)
-    if not project_path or not os.path.exists(project_path):
-        abort(404, "Project not found.")
-    return jsonify(get_file_tree(project_path))
+@app.route('/api/project/manifest', methods=['POST'])
+def project_set_manifest():
+    """Set project plan and file manifest"""
+    data = request.get_json() or {}
+    project_id = data.get("projectId")
+    plan = data.get("plan")
+    manifest_obj = data.get("manifest")
+    
+    if not project_id:
+        abort(400, description="Missing projectId")
+    
+    mf = _load_manifest(project_id)
+    mf["plan"] = plan
+    mf["manifest"] = manifest_obj
+    _save_manifest(project_id, mf)
+    
+    # Update context document
+    ctx = _safe_join(project_id, "CONTEXT.md")
+    with ctx.open("a", encoding="utf-8") as fp:
+        fp.write("\n## Execution Plan\n")
+        fp.write(plan or "(No plan provided)")
+        fp.write("\n\n## File Structure\n")
+        if manifest_obj and manifest_obj.get("files"):
+            for file_info in manifest_obj["files"]:
+                fp.write(f"- {file_info.get('path', 'unknown')}: {file_info.get('intent', 'no description')}\n")
+        fp.write("\n")
+    
+    return jsonify({"ok": True})
 
-@app.route('/api/projects/<project_id>/file', methods=['GET', 'POST'])
-def handle_file(project_id):
-    project_path = get_project_path(project_id)
-    if not project_path:
-        abort(404, "Project not found.")
+@app.route('/api/project/generate', methods=['POST'])
+def project_generate_file():
+    """Generate a specific project file with enhanced Phaser support"""
+    data = request.get_json() or {}
+    project_id = data.get("projectId")
+    target_path = data.get("path")
+    chat_model = data.get("chat_model")
+    code_model = data.get("code_model")
+    
+    if not project_id or not target_path or not code_model:
+        abort(400, description="Missing required fields")
+    
+    mf = _load_manifest(project_id)
+    brief = mf.get("brief", "")
+    plan = mf.get("plan") or ""
+    manifest_obj = mf.get("manifest") or {}
+    file_map = mf.get("files") or {}
+    project_type = mf.get("type", "generic")
+    
+    manifest_paths = [f.get("path") for f in (manifest_obj.get("files") or [])]
+    
+    # Collect file summaries
+    summaries = []
+    for p, meta in file_map.items():
+        if meta.get("summary"):
+            summaries.append(f"- {p}: {meta['summary'][:600]}")
+    
+    # Enhanced prompt for Phaser projects
+    extra_instructions = ""
+    if project_type == "phaser" or "game" in target_path.lower():
+        extra_instructions = """
+Special Instructions for Phaser 3.88:
+- Use modern Phaser 3.88 API (not older versions)
+- Implement proper scene lifecycle (init, preload, create, update)
+- Use ES6 classes for scenes
+- Configure proper physics system if needed
+- Handle responsive sizing
+- Include proper asset loading in preload()
+- Use proper Phaser.GameObjects for sprites, text, etc.
+"""
+    
+    prompt = f"""Generate the file: {target_path}
 
-    if request.method == 'GET':
-        filepath = request.args.get('path')
-        abs_path = os.path.abspath(os.path.join(project_path, filepath))
-        if not abs_path.startswith(os.path.abspath(project_path)):
-            abort(403)
-        with open(abs_path, 'r', encoding='utf-8') as f:
-            return jsonify({"path": filepath, "content": f.read()})
+Project Type: {project_type}
+Project Brief: {brief}
 
-    if request.method == 'POST':
-        data = request.json
-        filepath, content = data.get('path'), data.get('content', '')
-        abs_path = os.path.abspath(os.path.join(project_path, filepath))
-        if not abs_path.startswith(os.path.abspath(project_path)):
-            abort(403)
-        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        with open(abs_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        return jsonify({"status": "success", "path": filepath})
+Execution Plan:
+{plan}
 
-# --- API: ASSETS & EXAMPLES ---
-@app.route('/api/assets', methods=['GET', 'POST'])
-def handle_assets():
-    if request.method == 'GET':
-        assets = [f for f in os.listdir(ASSETS_DIR) if os.path.isfile(os.path.join(ASSETS_DIR, f))]
-        return jsonify(sorted(assets))
-    if request.method == 'POST':
-        if 'assetFile' not in request.files:
-            return abort(400, "No file part in request.")
-        file = request.files['assetFile']
-        if file.filename == '':
-            return abort(400, "No selected file.")
-        if file:
-            filename = secure_filename(file.filename)
-            file.save(os.path.join(ASSETS_DIR, filename))
-            return jsonify({"status": "success", "filename": filename})
+Project Files:
+{json.dumps(manifest_paths, indent=2)}
 
-@app.route('/api/examples', methods=['GET'])
-def list_examples():
-    if not os.path.exists(EXAMPLES_DIR):
-        return jsonify([])
-    # We list subdirectories inside the 'examples/assets' folder as this is where phaser examples are
-    examples_assets_path = os.path.join(EXAMPLES_DIR, 'assets')
-    if not os.path.exists(examples_assets_path):
-         return jsonify([])
-    examples = [d for d in os.listdir(examples_assets_path) if os.path.isdir(os.path.join(examples_assets_path, d))]
-    return jsonify(sorted(examples))
+Existing File Summaries:
+{chr(10).join(summaries) if summaries else "(none yet)"}
+{extra_instructions}
 
-@app.route('/api/examples/<example_name>', methods=['POST'])
-def load_example(example_name):
-    # This needs to be adapted based on the actual structure of the cloned repo
-    # For now, we assume a simple copy, but this would need more logic for a real implementation
-    return jsonify({"status": "error", "message": "Example loading not fully implemented yet."})
+Rules:
+- Output ONLY raw file content for {target_path}
+- No code fences, no commentary, no explanations
+- For HTML: complete document with all necessary tags
+- For JS: proper module with exports if needed
+- For Phaser: use version 3.88.0 CDN
+- Respect cross-file contracts from summaries
+- Match the file intent from the manifest"""
+    
+    try:
+        r = requests.post(f"{OLLAMA_API_URL}/api/chat", json={
+            "model": code_model,
+            "messages": [
+                {"role": "system", "content": 
+                 "You are an expert Phaser 3 game developer. Generate clean, working code."},
+                {"role": "user", "content": prompt}
+            ],
+            "stream": False
+        }, timeout=60)
+        r.raise_for_status()
+        code = (r.json().get("message") or {}).get("content", "")
+        
+        # Clean up common issues
+        code = code.strip()
+        if code.startswith("```"):
+            # Remove code fences if model added them
+            lines = code.split('\n')
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1] == "```":
+                lines = lines[:-1]
+            code = '\n'.join(lines)
+        
+    except Exception as e:
+        return jsonify({"error": f"Code generation failed: {str(e)}"}), 500
+    
+    # Save generated file
+    f = _safe_join(project_id, target_path)
+    f.write_text(code, encoding="utf-8")
+    
+    meta = {
+        "hash": _hash_content(code),
+        "size": len(code),
+        "lang": pathlib.Path(target_path).suffix.lstrip(".").lower()
+    }
+    
+    if "phaser" in code.lower():
+        meta["framework"] = "phaser"
+    
+    mf["files"][target_path] = {**mf.get("files", {}).get(target_path, {}), **meta}
+    _save_manifest(project_id, mf)
+    
+    return jsonify({
+        "ok": True, 
+        "path": target_path, 
+        "hash": meta["hash"], 
+        "content": code,
+        "framework": meta.get("framework")
+    })
 
+@app.route('/api/project/export', methods=['GET'])
+def project_export():
+    """Export project as a zip file"""
+    project_id = request.args.get("projectId")
+    if not project_id:
+        abort(400, description="Missing projectId")
+    
+    import zipfile
+    import io
+    
+    root = PROJECTS_DIR / project_id
+    if not root.exists():
+        abort(404, description="Project not found")
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for file_path in root.rglob("*"):
+            if file_path.is_file() and not file_path.name.startswith('.'):
+                arcname = file_path.relative_to(root)
+                zip_file.write(file_path, arcname)
+    
+    zip_buffer.seek(0)
+    
+    from flask import send_file
+    return send_file(
+        zip_buffer,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'project_{project_id}.zip'
+    )
 
-# --- MAIN EXECUTION ---
+@app.route('/api/project/list', methods=['GET'])
+def project_list():
+    """List all projects"""
+    projects = []
+    for project_dir in PROJECTS_DIR.iterdir():
+        if project_dir.is_dir():
+            manifest = _load_manifest(project_dir.name)
+            if manifest:
+                projects.append({
+                    "id": manifest.get("id"),
+                    "name": manifest.get("name"),
+                    "type": manifest.get("type", "generic"),
+                    "created_at": manifest.get("created_at"),
+                    "file_count": len(manifest.get("files", {}))
+                })
+    
+    projects.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return jsonify({"projects": projects})
+
 if __name__ == '__main__':
-    setup_directories()
-    setup_phaser()
-    setup_phaser_examples()
+    print(f"Studio42 starting...")
+    print(f"Ollama API URL: {OLLAMA_API_URL}")
+    print(f"Projects directory: {PROJECTS_DIR}")
+    print(f"Access the UI at: http://127.0.0.1:5042")
     app.run(host='127.0.0.1', port=5042, debug=True)
-

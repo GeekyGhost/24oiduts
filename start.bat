@@ -1,7 +1,7 @@
 @echo off
 REM This script automates the setup and launch of the Studio42 application.
 
-TITLE Studio42 Launcher v2.0
+TITLE Studio42 Launcher
 
 REM Check if a Python virtual environment folder 'venv' exists.
 IF NOT EXIST venv (
@@ -32,13 +32,12 @@ IF %ERRORLEVEL% NEQ 0 (
 )
 echo [SUCCESS] All packages are up to date.
 
-REM Launch the main Python application using the venv's python executable.
+REM Launch the main Python application.
 echo.
-echo [INFO] Launching Studio42 GameDev AI...
+echo [INFO] Launching Studio42...
 echo You can now access the UI in your web browser at http://127.0.0.1:5042
 echo Press CTRL+C in this window to stop the server.
 echo.
-venv\Scripts\python.exe app.py
+python app.py
 
 pause
-
