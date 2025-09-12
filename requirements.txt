@@ -1,4 +1,25 @@
+# Studio42 Enhanced - Core Dependencies
 Flask>=2.3.0
 Flask-CORS>=4.0.0
 requests>=2.31.0
 werkzeug>=2.3.0
+
+# Context Management Dependencies
+tiktoken>=0.5.1               # Token counting for context management
+dataclasses>=0.6; python_version < "3.7"  # Backport for older Python
+
+# Enhanced functionality dependencies
+python-magic>=0.4.27         # File type detection
+Pillow>=10.0.0               # Image processing for asset thumbnails
+
+# Optional: For better file type detection on Windows
+python-magic-bin>=0.4.14; sys_platform == "win32"
+
+# Development and Testing (Optional)
+pytest>=7.0.0               # For running tests
+black>=23.0.0               # Code formatting
+flake8>=6.0.0               # Code linting
+
+# Performance Optimization (Optional)
+ujson>=5.7.0                # Faster JSON parsing
+gunicorn>=21.0.0            # Production WSGI server
