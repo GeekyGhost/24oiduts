@@ -1,5 +1,7 @@
 # Studio42 Enhanced - AI-Powered Multi-File Game Development with Adaptive Context Management
 
+This is a work in progress and not recommended for use at this time.
+
 🚀 **Studio42 Enhanced** is a revolutionary web-based IDE that transforms game development through AI. Generate complete, professional Phaser 3 games with proper multi-file project structures, comprehensive asset management, real-time streaming responses, and intelligent context management that adapts to your workflow.
 
 ![Studio42 Enhanced](https://img.shields.io/badge/Studio42-Enhanced_v2.0-7b6ffc?style=for-the-badge)
